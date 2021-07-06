@@ -1,0 +1,818 @@
+---
+title: "Spatial Econometrics"
+author: "Adinda Herawati and Catherine Sunil"
+date: "5/31/2021"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo = FALSE, include=FALSE}
+library(spdep)
+library(rgdal)
+library(maptools)
+library(sp)
+library(RColorBrewer)
+library(classInt)
+library(GISTools)
+library(maps)
+library(classInt)
+library(dplyr)
+library(randomcoloR)
+library(spgwr)
+library(ggmap)
+library(osmdata)
+library(lmtest)
+```
+
+# Introduction
+  The aims of this spatial project are creating visualization of the zomato dataset 
+  using India Maps and building model for spatial dependence. Our dataset is from kaggle   (https://www.kaggle.com/shrutimehta/zomato-restaurants-data?select=zomato.csv). In the dataset there are 21 variables which consist of 
+  1. Restaurant ID
+     Identification number
+     
+  2. Restaurant name 
+     Name of the restaurant
+  
+  3. Country code 
+     There are 15 countries in the dataset. There are India, Australia, Brazil, Canda, 
+     Indonesia, New Zealand, Phillipines, Qatar, Singapore, South Africa, Sri Lanka, 
+     Turkey, UAE, United Kingdom ,and United States.
+  
+  4. City
+     City name of the restaurants
+  
+  5. Address 
+     Address of the restaurants
+  
+  6. Locality 
+     Short address of the restaurant
+  
+  7. Locality Verbose 
+     Long address of the restaurant
+  
+  8. Longitude
+  
+  9. Latitude 
+  
+  10. Cuisines 
+     Types of cuisines served
+  
+  11. Average Cost Per Two
+     Average costs if two people visit to restaurant
+
+  12. Currency
+  
+  13. Has Table Booking
+      Can we book tables in Restaurant? Yes/No
+  
+  14. Has Online Delivery
+      Can we have online delivery ? Yes/No
+  
+  15. Is Delivering Now
+      Is the restaurant delivering food now? Yes/No
+  
+  16. Switch to order menu
+      Switch to order menu ? Yes/ No
+  
+  17. Price range
+      Categorized price between 1-4
+  
+  18. Aggregate rating
+      Categorizing ratings between 1-5
+  
+  19. Rating color
+      Different colors representing customer ratings
+  
+  20. Rating text
+      Different rating from customers: Not rated, Poor, Average, Good, Very Good, and 
+      Excellent.
+  
+  21. Votes
+      Number of votes received by restaurants from customers
+
+```{r}
+#setwd("C:/Users/Adinda Rizky Herawat/Dropbox/Spring Semester 2020_2021/2. Spatial Econometrics in R/Project/data")
+#setwd("C:/Users/PC-CATHERINE/Dropbox/My PC (LAPTOP-C7FBOJ3B)/Downloads/Project")
+zomato <- read.csv("data/zomato.csv",sep=",")
+country.code <- read.csv2("data/countrycode.csv",sep=",")
+names(country.code)<- c("Code","Country")
+city_centroid <- read.csv("data/Indian Cities Database.csv",sep=",")
+
+```
+
+# Preparation Dataset
+  In this part we will explain that we will not use all the observations in the dataset. We would like to focus on one country only.   
+
+```{r}
+# Identifying country based on country code
+zomatodata <- merge(zomato, country.code, by.x="Country.Code", by.y="Code", all.x=TRUE, all.y=FALSE)
+zomatodata <- merge(zomatodata, city_centroid, by.x="City", by.y="City", all.x=TRUE, all.y=FALSE)
+
+# Checking number of countries
+unique(zomatodata$Country) # 15 countries
+
+zomatodata %>%
+  group_by(Country) %>%
+  summarise(n())
+```
+Based on the result above, among those 15 countries, India is the highest number of observations in the dataset. Therefore, we would like to analyze for the following analysis with India data only.
+
+
+```{r}
+
+library(geosphere)
+# India
+zomatoindia <- zomatodata %>% filter(Country=="India")
+zomatoindia$City <- trimws(zomatoindia$City, which = c("both"))
+city_centroid$City <- trimws(city_centroid$City, which = c("both"))
+
+# library(lwgeom) #additional dependency
+# 
+# st_distance(support.sf[1:5,],support.sf[1:5,])
+
+zomatoindia$dist <-distHaversine(zomatoindia[,c('Longitude', 'Latitude')], zomatoindia[,c('Long','Lat')])
+# sum(is.na(zomatoindia$dist))
+zomatoindia <- na.omit(zomatoindia)
+
+
+
+zomatoindia$Cafe <- factor(ifelse(grepl("Cafe|Beverages",zomatoindia$Cuisines),1,0))
+zomatoindia$North_Indian <- factor(ifelse(grepl("North_Indian",zomatoindia$Cuisines),1,0))
+zomatoindia$Continental <- factor(ifelse(grepl("Continental",zomatoindia$Cuisines),1,0))
+zomatoindia$South_Indian <- factor(ifelse(grepl("South Indian|Chettinad",zomatoindia$Cuisines),1,0))
+zomatoindia$Desserts <- factor(ifelse(grepl("Desserts|Mithai",zomatoindia$Cuisines),1,0))
+zomatoindia$Fast_Food <- factor(ifelse(grepl("Fast Food|Finger Food",zomatoindia$Cuisines),1,0))
+zomatoindia$Lebanese <- factor(ifelse(grepl("Lebanese",zomatoindia$Cuisines),1,0))
+zomatoindia$Italian <- factor(ifelse(grepl("Italian",zomatoindia$Cuisines),1,0))
+zomatoindia$American <- factor(ifelse(grepl("American",zomatoindia$Cuisines),1,0))
+zomatoindia$Mediterranean <- factor(ifelse(grepl("Mediterranean",zomatoindia$Cuisines),1,0))
+zomatoindia$Thai <- factor(ifelse(grepl("Thai",zomatoindia$Cuisines),1,0))
+zomatoindia$Hyderabadi <- factor(ifelse(grepl("Hyderabadi",zomatoindia$Cuisines),1,0))
+zomatoindia$Lucknowi <- factor(ifelse(grepl("Lucknowi",zomatoindia$Cuisines),1,0))
+zomatoindia$Street_Food <- factor(ifelse(grepl("Street Food",zomatoindia$Cuisines),1,0))
+zomatoindia$French <- factor(ifelse(grepl("French",zomatoindia$Cuisines),1,0))
+zomatoindia$Japanese <- factor(ifelse(grepl("Japanese|Sushi",zomatoindia$Cuisines),1,0))
+zomatoindia$Nepalese <- factor(ifelse(grepl("Nepalese",zomatoindia$Cuisines),1,0))
+zomatoindia$Maharashtrian <- factor(ifelse(grepl("Maharashtrian",zomatoindia$Cuisines),1,0))
+
+zomatoindia$Mughlai <- factor(ifelse(grepl("Mughlai",zomatoindia$Cuisines),1,0))
+zomatoindia$Gujarati <- factor(ifelse(grepl("Gujarati",zomatoindia$Cuisines),1,0))
+zomatoindia$Kashmiri <- factor(ifelse(grepl("Kashmiri",zomatoindia$Cuisines),1,0))
+zomatoindia$Kerala <- factor(ifelse(grepl("Kerala",zomatoindia$Cuisines),1,0))
+zomatoindia$Biryani <- factor(ifelse(grepl("Biryani",zomatoindia$Cuisines),1,0))
+zomatoindia$Middle_Eastern <- factor(ifelse(grepl("Middle Eastern",zomatoindia$Cuisines),1,0))
+zomatoindia$Bakery <- factor(ifelse(grepl("Bakery",zomatoindia$Cuisines),1,0))
+zomatoindia$Seafood <- factor(ifelse(grepl("Seafood",zomatoindia$Cuisines),1,0))
+zomatoindia$Mexican <- factor(ifelse(grepl("Mexican",zomatoindia$Cuisines),1,0))
+zomatoindia$Bengali <- factor(ifelse(grepl("Bengali",zomatoindia$Cuisines),1,0))
+
+
+
+
+
+
+
+
+
+
+
+# movies_agg<-merge(zomatoindia, ratings, by="movieId")
+# movies_agg<-aggregate(movies_agg[,4:22], list(movies_agg$movieId), mean)
+# movies_agg<-merge(zomatoindia[,1:2],movies_agg, by.x  ="movieId", by.y="Group.1")
+# movies_agg<-within(movies_agg, rm(userId, timestamp))
+
+# Preparation Dataset
+zomatoindia$Country.Code <- NULL
+zomatoindia$Restaurant.ID <- NULL
+zomatoindia$Restaurant.Name <- NULL
+zomatoindia$Address <- NULL
+# #zomatoindia$City <- NULL
+# zomatoindia$Longitude <- NULL
+# zomatoindia$Latitude <- NULL
+# zomatoindia$Country <- NULL
+# #zomatoindia$Locality <- NULL
+#zomatoindia$Locality.Verbose <- NULL
+#zomatoindia$Cuisines <- NULL
+
+
+#zomatoindia <- zomatoindia[,c(11:22)]
+# zomatoindia$Currency <- NULL
+# zomatoindia$Country <- NULL
+
+zomatoindia$Has.Table.booking <- factor(zomatoindia$Has.Table.booking, 
+                                        levels=c("No","Yes"), ordered=FALSE)
+
+zomatoindia$Has.Online.delivery <- factor(zomatoindia$Has.Online.delivery, 
+                                          levels=c("No","Yes"), ordered=FALSE)
+
+zomatoindia$Is.delivering.now <- factor(zomatoindia$Is.delivering.now, 
+                                        levels=c("No","Yes"), ordered=FALSE)
+
+zomatoindia$Switch.to.order.menu <- factor(zomatoindia$Switch.to.order.menu,
+                                           levels=c("No","Yes"), ordered=FALSE)
+
+zomatoindia$Price.range <- factor(zomatoindia$Price.range, levels=c(1,2,3,4), 
+                                  ordered=TRUE)
+
+zomatoindia$Aggregate.rating <- as.numeric(as.character(zomatoindia$Aggregate.rating))
+
+zomatoindia$Rating.color <- factor(zomatoindia$Rating.color, 
+                                   levels=c("Red","Orange","White",
+                                            "Yellow","Green","Dark Green"))
+
+zomatoindia$Rating.text <- factor(zomatoindia$Rating.text, 
+                                  levels=c("Not rated","Poor","Average",
+                                           "Good", "Very Good", "Excellent"))
+
+
+
+```
+
+Now that we have added all the variables we require and have prepared the dataset, lets start with some visualisations to understand the dataset better.
+
+# Reading maps
+  Below we would like to show maps based on the administative area
+```{r}
+ind_adm0 <- readOGR("data/IND_adm0")
+ind_adm1 <-readOGR("data/IND_adm1")
+
+ind_adm2 <- readOGR("data/IND_adm2")
+ind_adm3 <- readOGR("data/IND_adm3")
+ind_adm4 <- readOGR("data/IN_cities")
+# changing projections
+adm0 <- spTransform(ind_adm0, CRS("+proj=longlat +datum=NAD83"))
+adm1 <- spTransform(ind_adm1, CRS("+proj=longlat +datum=NAD83"))
+adm2 <- spTransform(ind_adm2, CRS("+proj=longlat +datum=NAD83"))
+adm3 <- spTransform(ind_adm3, CRS("+proj=longlat +datum=NAD83"))
+adm4 <- spTransform(ind_adm4, CRS("+proj=longlat +datum=NAD83"))
+```
+
+```{r}
+plot(adm0)
+```
+This plot only show the India maps
+
+```{r}
+plot(adm1)
+```
+This plot shows India maps with dividing by provinces
+
+```{r}
+plot(adm2)
+```
+This plot shows India maps with dividing by cities
+
+```{r}
+plot(adm3)
+```
+```{r}
+plot(adm4)
+
+```
+Awe can see we have the shape files on the country-level, state-level, district-level and city/town - level.
+
+
+# Visualization 
+  This plot below shows India maps with information of state names
+```{r}
+# information about the province
+adm_info <- read.csv2("data/IND_adm1/IND_adm1.csv",sep=",")
+# extracting database from shapefile
+prov.df <- as.data.frame(adm1)
+myColor <- randomcoloR::distinctColorPalette(k = 38)
+plot(adm1, col=myColor)
+# labels of provincial names
+crds.adm1 <- coordinates(adm1)
+text(crds.adm1, label=prov.df$NAME_1, cex=0.7, font=2)
+title(main="India Maps")
+```
+
+# Plotting based on certain variables
+  This plot below shows the range average price for two people in India. Based on information from the summary that the range of average for two people in India is between 0 and 8,000 INR. Mostly the price range in around 450 INR. 
+  
+```{r}
+summary(zomatoindia$Aggregate.rating)
+hist(zomatoindia$Aggregate.rating)
+```
+
+
+```{r}
+library(DataExplorer)
+
+plot_histogram(zomatoindia)
+
+```
+
+```{r}
+
+plot_boxplot(zomatoindia, by = c("Has.Online.delivery"))
+
+```
+
+
+```{r}
+intervals <- 18
+
+myColor2 <- randomcoloR::distinctColorPalette(k =9)
+#myColor2 <-colorRampPalette(c("red","yellow","springgreen","royalblue"))
+
+classes<-classIntervals(zomatoindia$Average.Cost.for.two, intervals)#, style="fixed", 
+          #fixedBreaks=c(0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000))
+
+color.table<-findColours(classes, myColor2) 
+
+plot(adm1, col=color.table)
+
+legend("bottomleft", legend=names(attr(color.table, "table")),
+fill=attr(color.table, "palette"), cex=0.8, bty="n")
+
+title(main="Average Cost for Two People in India")
+```
+We see the majority of the states having the price range of 0-1000 INR for the average cost for two people. From the graph, we can see that few states which are mostly in western sides and two states on the east have quite higher value of average cost for two people.  
+ 
+
+# Maps with points based on aggregate rating variable
+  
+```{r}
+brks<-c(1,2,3,4,5)
+size<-brks/2
+
+#plot(adm0, border="grey90")
+plot(adm1, border="grey50")
+#cols=brewer.pal(7, "Reds")
+cols= randomcoloR::distinctColorPalette(k = 5)
+
+points(crds.adm1, col=cols[findInterval(zomatoindia$Aggregate.rating, brks)], 
+cex=size[findInterval(zomatoindia$Aggregate.rating, brks)], pch=21, bg=cols[findInterval(zomatoindia$Aggregate.rating, brks)])
+
+legend("bottomleft", legend=brks, pt.bg=cols, pt.cex=size, bty="n", pch=21)
+title(main="Aggregate Zomato Rating Score in India Restaurant")
+```
+In the plot below it will show the zomato rating score from customers in all states. It seems that most of customers gave score between 3 and 4. 
+
+# Plot for Delhi
+  New Delhi is the capital city in India and with this plot, we would like to remark the   New Delhi in the India maps.
+  
+```{r}
+# read shapefile directly to sf collection
+pov.sf <- st_read("data/IND_adm2/IND_adm2.shp", stringsAsFactors = FALSE)
+pov.sf <- st_transform(pov.sf, crs = "+proj=longlat +datum=NAD83")
+pov.sf
+
+pov.sf.centr <- st_centroid(pov.sf)
+
+ggplot()+
+  geom_sf(pov.sf, mapping = aes(geometry=geometry))+
+  geom_sf(pov.sf.centr, mapping = aes(geometry=geometry)) +
+  geom_sf(pov.sf %>% filter(NAME_1 =='Delhi'), 
+          mapping = aes(geometry=geometry), fill = "red")+
+  ggtitle("Location of Capital City")+
+  theme(legend.position = "none",
+    plot.title = element_text(hjust=0.5, face="bold"),
+    plot.subtitle = element_text(hjust=0.5, face="bold"),
+    panel.grid.major = element_line(colour = "white"), 
+    panel.grid.major.x = element_line(size=1, colour="white"), 
+    panel.grid.minor.y = element_line(size = 1, colour = "white"),
+    panel.background = element_rect(fill = "white", colour = "white"))
+```
+
+Here is the larger version of New Delhi
+```{r}
+delhi.pov.sf <- pov.sf %>% filter(NAME_1=='Delhi') 
+
+ggplot() +
+    geom_sf(delhi.pov.sf, mapping = aes(geometry=geometry), fill="blue") +
+    ggtitle("New Delhi")+
+    theme(legend.position = "none",
+    plot.title = element_text(hjust=0.5, face="bold"),
+    plot.subtitle = element_text(hjust=0.5, face="bold"),
+    panel.grid.major = element_line(colour = "white"), 
+    panel.grid.major.x = element_line(size=1, colour="white"), 
+    panel.grid.minor.y = element_line(size = 1, colour = "white"),
+    panel.background = element_rect(fill = "white", colour = "white"))
+```
+
+
+# Location of the restaurant
+
+
+Lets plot the location of restaurants in Delhi:
+```{r}
+delhi_box <- getbb("New Delhi, India")
+
+# Get Restaurant information in the New Delhi
+#https://wiki.openstreetmap.org/wiki/Map_features  
+
+restaurant.sf = opq(delhi_box) %>% # limit search to the bounding box
+  add_osm_feature(key='amenity', value = 'restaurant') %>% 
+  osmdata_sf() # save the data into sf collection
+
+ggplot() + 
+  geom_sf(delhi.pov.sf, mapping = aes(geometry = geometry))+
+  geom_sf(restaurant.sf$osm_points, mapping = aes(geometry = geometry)) +
+  ggtitle("Location of the Restaurants in New Delhi") +
+  theme(legend.position = "none",
+  plot.title = element_text(hjust=0.5, face="bold"),
+  plot.subtitle = element_text(hjust=0.5, face="bold"),
+  panel.grid.major = element_line(colour = "white"), 
+  panel.grid.major.x = element_line(size=1, colour="white"), 
+  panel.grid.minor.y = element_line(size = 1, colour = "white"),
+  panel.background = element_rect(fill = "white", colour = "white"))
+```
+In New Delhi, We see most of the restaurants are located towards south eastern of the states this is because in the descriptions of the restaurant fast food chains are not included. Furthermore, India known to have a lot of street food avenues which are probably more ubiquitous than restaurants. That's why there is cluster of restaurants in the one side of the city.
+
+# Public Spaces in New Delhi
+
+```{r}
+city_delhi.sf <- opq(delhi_box) %>% 
+  add_osm_feature(key='admin_level', value='9') %>% 
+  osmdata_sf()
+
+bus.sf <- opq(delhi_box) %>% 
+  add_osm_feature(key='amenity', value = 'bus_station') %>% osmdata_sf()
+
+hospital.sf <- opq(delhi_box) %>% 
+  add_osm_feature(key='amenity', value = 'hospital') %>% osmdata_sf()
+
+cinema.sf <- opq(delhi_box) %>% 
+  add_osm_feature(key='amenity', value = 'cinema') %>% osmdata_sf()
+
+college.sf <- opq(delhi_box) %>% 
+  add_osm_feature(key='amenity', value = 'college') %>% osmdata_sf()
+
+bank.sf <- opq(delhi_box) %>% 
+  add_osm_feature(key='amenity', value = 'bank') %>% osmdata_sf()
+
+#temple.sf <- opq(delhi_box) %>% 
+#  add_osm_feature(key='building', value = 'temple') %>% osmdata_sf()
+
+#mosque.sf <- opq(delhi_box) %>% 
+#  add_osm_feature(key='building', value = 'mosque') %>% osmdata_sf()
+
+#church.sf <- opq(delhi_box) %>% 
+#  add_osm_feature(key='building', value = 'church') %>% osmdata_sf()
+
+forest_delhi.sf = opq(bbox = "New Delhi India") %>% 
+  add_osm_feature(key = "landuse", value = "forest") %>% 
+  osmdata_sf() 
+
+tr <- opq(delhi_box) %>% 
+  add_osm_feature(key='route', value = 'bus')
+
+su <- opq(delhi_box) %>% 
+  add_osm_feature(key='route', value = 'subway') 
+
+#merge them to one object
+transport_delhi.sf = c(osmdata_sf(tr), osmdata_sf(su))
+
+ggplot() +
+  geom_sf(city_delhi.sf$osm_lines, mapping = aes(geometry=geometry))+
+  geom_sf(transport_delhi.sf$osm_lines, mapping = aes(geometry=geometry,
+                                                      col = railway)) +
+  geom_sf(hospital.sf$osm_points, mapping = aes(geometry=geometry, 
+                                                shape=amenity)) +
+  geom_sf(bank.sf$osm_points, mapping = aes(geometry=geometry, 
+                                            shape= amenity)) +
+  geom_sf(college.sf$osm_points, mapping = aes(geometry=geometry, 
+                                                  shape= amenity)) +
+  geom_sf(cinema.sf$osm_points, mapping = aes(geometry=geometry, 
+                                              shape= amenity)) +
+  geom_sf(forest_delhi.sf$osm_multipolygons, mapping = aes(geometry=geometry, 
+                                                         fill = landuse)) +
+#  geom_sf(temple.sf$osm_points, mapping = aes(geometry=geometry, 
+#                                                  key= building)) +
+#  geom_sf(mosque.sf$osm_points, mapping = aes(geometry=geometry, 
+#                                                  key= building)) +
+#  geom_sf(mosque.sf$osm_points, mapping = aes(geometry=geometry, 
+#                                                  key= building)) +
+  scale_color_brewer(palette = "Dark2")+
+  scale_fill_brewer(palette = "Set2")+
+  labs(title = "Map of New Delhi") 
+  #theme_minimal()
+```
+This plot shows some public spaces in New Delhi, there are bus station, hospital, cinema, university, bank, and forest. We can observe most of colleges are situated in the right side of the
+
+
+This is another version of the maps using ggmap function
+```{r}
+delhi_map <- get_map(getbb("New Delhi India"),  maptype = "toner-background")
+#ggmap(delhi_map)
+
+ggmap(delhi_map) +
+  geom_sf(city_delhi.sf$osm_lines, 
+          mapping = aes(geometry=geometry), inherit.aes = FALSE)+
+  geom_sf(transport_delhi.sf$osm_lines, mapping = aes(geometry=geometry,
+          col = railway), inherit.aes = FALSE)+ 
+  geom_sf(hospital.sf$osm_points, mapping = aes(geometry=geometry, 
+         shape=amenity), inherit.aes = FALSE) +
+  geom_sf(bank.sf$osm_points, mapping = aes(geometry=geometry, 
+                              shape= amenity), inherit.aes = FALSE) +
+  #geom_sf(university.sf$osm_points, mapping = aes(geometry=geometry, 
+                              #shape= amenity), inherit.aes = FALSE) +
+  geom_sf(cinema.sf$osm_points, mapping = aes(geometry=geometry, 
+                                shape= amenity), inherit.aes = FALSE) +
+  geom_sf(forest_delhi.sf$osm_multipolygons, mapping = aes(geometry=geometry, 
+                                  fill = landuse), inherit.aes = FALSE) +
+  scale_color_brewer(palette = "Dark2")+
+  scale_fill_brewer(palette = "Set2")+
+  labs(title = "Map of New Delhi with 5 layers and ggmap background")
+
+```
+From the maps above and observing Delhi, we have assumed that the restaurants are present in a cluster more or less, and next we want to see if there is a correlation between space and the Aggregate Rating of a restaurant on Zomato. 
+
+# Spatial Dependence
+
+We have chosen to apply the Spatial Dependance model for our dataset. So, first we start with creating the spatial weights matrix:
+```{r}
+# preparing spatial weights matrix
+crds.adm4 <- coordinates(adm4)
+cont.nb<-poly2nb(as(adm4, "SpatialPolygons"))
+cont.listw<-nb2listw(cont.nb, style="W", zero.policy = T)
+print(cont.listw,zero.policy = TRUE)# summary of matrix
+#https://stat.ethz.ch/pipermail/r-help/2007-November/146391.html
+#https://community.rstudio.com/t/error-in-nb2listw-w-nb-style-w-empty-neighbour-sets-found/96922/3
+```
+Next, we move on to preparing the formula for our model. Now, on checking the variables, we have made sure that it doesn't create a zero or singular matrix in the spatial weights matrix, the inversion of that matrix gives an error saying that a singular matrix cannot be inverted. So by taking the variables one by one, we have eliminated all the variables which were causing is to have a singular matrix. After this step wise elimination, we are left with the following variables:
+1) Average.Cost.for.Two 
+2) Price.range 
+3) dist 
+4) Cafe
+5) Desserts
+6) Fast_Food
+7) Has.Table.booking
+8) Has.Online.delivery
+
+```{r}
+# preparing model 
+form <- Aggregate.rating ~ Average.Cost.for.two + Price.range + dist + Cafe  + Desserts + Fast_Food + Has.Table.booking + Has.Online.delivery 
+  
+# variable switch to order menu doesn't work because this variable should be contain "Yes" or "No" but this variable only contains "No". then it is useless to use this variable
+```
+
+
+
+## Linear Model
+
+We start with linear model with these variables:
+
+```{r}
+zomatoindia1 <- zomatoindia[1:2340,]
+
+model.lm <- lm(form, data=zomatoindia1)
+summary(model.lm)
+```
+From the summary, we see that almost all the variables are significant with a 10% CI, but with 5% CI we find that Average cost, price range, Cafe , Desserts , 'Has table booking yes' and 'Has online delivery yes' are significant in determining average rating of a restaurant in Zomato. 
+It gives us an idea that when it comes to rating of a restaurant, not only the price,distance and delivery option are significant, but also the type of the restaurants. But before we further analyse the result, lets do some more test to find out if we have autocorrelation in the residuals and if we should include some non linear variables:
+
+
+```{r}
+# diagnostics of linear model
+bptest(model.lm)
+
+# Ho: Homocscedasticity
+# H1: Heteroscedasticityy
+
+# Our p-value is < 2.2e-16 which is below 5%, therefore we would like to reject H0 then our conclusion is our linear model has Homocscedasticity.
+```    
+
+Th p-value from the Breusch Pagan test suggests that we have to reject the null hypothesis of homosckedasticity as the residuals seem to autocorrelated. This means that our R -squares  (25%) and the p-value might be inflated. 
+Next lest do Ramsey's resset test:
+
+```{r}
+# Ramsey's test for functional form
+# H1: when non-linear variables (like powers of the variables) should be included as model is mis-specified
+resettest(model.lm, power=2, type="regressor") 
+
+# Our p-value is 0.0004171 which is below 5%, therefore we would like to reject H0 then our conclusion is non-linear variables like powers of the variables should be included
+```
+
+
+Next, lets move on to plotting the residuals to see the distribution across the country:
+
+```{r}
+# Spatial distribution of OLS residuals
+summary(model.lm$residuals)
+res <- model.lm$residuals
+brks<-c(min(res), mean(res)-sd(res), mean(res), mean(res)+sd(res), max(res))
+cols<-c("steelblue4","lightskyblue","thistle1","plum3")
+ 
+plot(adm1, col=cols[findInterval(res,brks)])
+plot(adm2, add=TRUE, lwd=2)
+title(main="Spatial Distribution of OLS residuals")
+legend("bottomleft", legend=c("<mean-sd", "(mean-sd, mean)", "(mean, mean+sd)", ">mean+sd"), leglabs(brks1), fill=cols, bty="n")
+```
+From the graph, We can see that most of the central states and some of the north western states have the residuals between (mean-sd,mean), indicating that the predicted ratings are higher than the actual ones.Whereas the states at the southern and eastern borders are between the mean and mean+sd, again indicating that the model predicts a lower rating for the restaurants in these regions than actual ratings. And the rest of the inland states(with the exception of Gujrat on the left) have the values outside (>mean+sd) indicating that model predicts a much lower rating in these states than the actual values.
+
+## Moran test
+
+Next, we will conduct the Moran test, which is a measure of spatial autocorrelation developed by Patrick Alfred Pierce Moran. Spatial autocorrelation is characterized by a correlation in a signal among nearby locations in space. The null hypothesis is that the spatial processes promoting the observed pattern of values is random chance.
+```{r}
+morantest.lm<- lm.morantest(model.lm, cont.listw, zero.policy = T)
+lm.morantest(model.lm, cont.listw, zero.policy = T)
+# since our p-value is greater than 5% which mean that our residuals are significant (there is autocorrelation in residuals) then we should follow spatial estimation
+```
+From the results of the Moran test we can infer that the spatial distribution of high values and/or low values in the dataset is more spatially dispersed than would be expected if underlying spatial processes were random. This indicates we can move ahead with spatial analysis.
+
+Next we will conduct the joint.count test:
+
+```{r}
+# test join.count for residuals (positive vs. negative)
+resid<-factor(cut(res, breaks=c(-1500, 0, 10300), labels=c("negative","positive")))
+joincount.test(resid, cont.listw, zero.policy = T) 
+
+# since p-value for both positive are less than 5% then it mean there is a difference clusters between positive values.
+```
+The BB join count test for spatial autocorrelation using a spatial weights matrix in weights list form for testing whether same-colour joins occur more frequently than would be expected if the zones were labelled in a spatially random way. From the p-values we can reject the null hypothesis and conclude that there is spatial pattern to our dataset.
+
+## Estimation of spatial models with 3,2,or 1 spatial components
+
+Next lets start with the GNS model:
+```{r}
+# Manski model (full specification) - includes spatial lag of Y (rho), 
+# spatial lag of X (theta), spatial error term (lambda)
+# option type="sacmixed" activates spatial lags of X
+
+library(spatialreg)
+
+# zomatodata1 <- zomatoindia %>% 
+#   group_by(City) %>%
+#   sample_frac(0.1)
+
+
+form <- Aggregate.rating ~ Average.Cost.for.two + Price.range + dist + Cafe  + Desserts + Fast_Food + Has.Table.booking + Has.Online.delivery 
+  
+  
+  
+  
+
+
+
+GNS_1<-sacsarlm(form, data=zomatoindia1, listw=cont.listw, type="sacmixed", method="LU", zero.policy = T)  # method="LU" speeds up computations
+summary(GNS_1)
+```
+
+With 10% , we see that all our lag variables are significant. Furthermore, from the p-values, we see that both the rho and lambda are significant and not equal to 0 and of the same sign, which is a good indication. And based on the AIC values, we see that our GNS model is indeed better than the linear model. Based on the 3 components, it seems like GNS model is quite good(as rho and lambda are significant and of the same sign), but we would like to move forward and check all the models, from a point of curiosity.
+
+
+So, lets start with the SAC model:
+
+
+```{r}
+
+# SAC / SARAR model - includes spatial lag of Y, spatial error term
+SAC_1<-sacsarlm(form,  data=zomatoindia1, listw=cont.listw, type="sac",zero.policy = T)
+summary(SAC_1)
+
+```
+The results of the SAC model is similar in terms of significance of rho and lambda to the GNS model, that is, they are significant. Also , again based on the AIC values, we see that the SAC model is still better than the linear model but not as good as the GNS or Manski model. Also, when it comes to the variables, all the variables are significant with a 10% significance level apart from one class of Price range(Price.range.C).
+
+Lets also run the Spatial Error model:
+```{r}
+# SEM - spatial error model
+# typically includes spatial error term only (with lambda coefficient)
+# option etype="emixed" activates spatial lags of X (with theta coeff.) # what makes spatial Durbin error model
+
+SDEM_1<-errorsarlm(form,  data=zomatoindia1, listw=cont.listw, etype="emixed",zero.policy = T) # with spatial lags of X
+summary(SDEM_1)
+
+
+SEM_1<-errorsarlm(form,  data=zomatoindia1, listw=cont.listw,zero.policy = T) # no spat-lags of X
+summary(SEM_1)
+```
+
+Based on the results of the spatial error models and the AIC models, we can safely say that the model with lags is better than the model without lags.But even the model with lags is still not better than the GNSmodel basd on AIC and number of significant variables.
+
+```{r}
+
+# SAR - spatial lag model
+# normally includes spatial lag of Y only (with rho coefficient)
+# option type="mixed" activates spatial lags of X (with theta coeff.)
+
+SDM_1<-lagsarlm(form,  data=zomatoindia1, listw=cont.listw, type="mixed",zero.policy = T) # with spatial lags of X
+summary(SDM_1)
+SAR_1<-lagsarlm(form,  data=zomatoindia1, listw=cont.listw,zero.policy = T) # no spatial lags of X
+summary(SAR_1)
+
+
+```
+
+
+From the Spatial Durbin Model and Spatial lag model, we see that even though the rho and lambda are significant, the  AIC values are still lower when compared to the GNS model. And when it come to the variables, all the variables apart from Price.range.C are significant. This variable seems to be insignificant in all the models.
+
+Nest, lets chek the SLX model:
+
+
+```{r}
+# from errorsarlm() library
+# an 'lm' model augmented with the spatially lagged RHS variables
+# RHS variables - right-hand side variables
+SLX_1<-lmSLX(form, data=zomatoindia1, listw=cont.listw,zero.policy = T)
+summary(SLX_1)
+```
+SLX model is interpreted as a normal OLS model, so looking at the variables again Price.range.C is not significant and the lag variables of lag.Average.Cost.for.two,lag.Price.range.C,lag.Cafe1 ,lag.Desserts1,lag.Fast_Food1  and lag.Has.Online.deliveryYes are not significant. The R-square is higher than the OLS model, overaal not that great. Lets see the AIC value of this model:
+
+```{r}
+
+AIC(SLX_1)
+
+```
+Looking at the AIC of the SLX model, again we can say that based on the number of significant varibales and AIC values, GNS model still seems to be better fit.
+
+
+# Comparing models
+
+
+Now that we have run all the models, lets compare them using liklihood ratio test and see the final results together:
+
+```{r, warning=FALSE}
+# LR (likelihood ratio) test - compares nested restricted model
+# H0 - restricted (narrower) model is better
+# H1 - unrestricted (wider) model is better
+# df in chi2 is the number of restricted parameters
+library(spatialreg)
+LR.sarlm(GNS_1, SDM_1)
+LR.sarlm(GNS_1, SDEM_1)
+LR.sarlm(GNS_1, SLX_1)
+LR.sarlm(SDM_1, SAR_1)
+LR.sarlm(SDM_1, SEM_1)
+LR.sarlm(SDM_1, SLX_1)
+LR.sarlm(SDEM_1, SLX_1)
+lrtest(model.lm, SLX_1)
+```
+
+
+
+```{r}
+
+library(texreg)
+screenreg(list(GNS_1,SDM_1,SDEM_1,SAR_1,SEM_1,SAC_1, SAR_1, model.lm))
+
+```
+Based on the results of the LR test and AIC values, we see that GNS is still the better model when compared to all the other possible models. It terms of the variables, we see that Price.Range.C is insignificant across most of the models and the rest of the variables are more or less significant in the top 3 or 4 models (based on AIC).
+
+
+#Impacts
+
+Lets examine the impacts of the GNS model next:
+
+```{r}
+
+
+# Direct and indirect impacts
+
+# distribution of total impact 
+# vector of traces of powers of a spatial weights matrix
+# converting censored listw to CsparseMatrix form
+W.c<-as(as_dgRMatrix_listw(cont.listw), "CsparseMatrix") 
+# the default values for the number of powers is 30
+trMat<-trW(W.c, type="mult") 
+
+GNS_1_imp<-impacts(GNS_1, tr=trMat, R=2000)
+summary(GNS_1_imp, zstats=TRUE, short=TRUE)
+
+
+```
+```{r}
+# extracting direct & total impacts
+a<-GNS_1_imp$res$direct
+b<-GNS_1_imp$res$total
+a/b # ratio of impacts
+```
+
+
+1) Average.Cost.for.two: The internal and the spillover effects for this variable is pretty equal, so almost 50%. And the total effect is also quite high compared to other variables. Meaning that the average cost for 2 people not only affects the Average rating in a given area, but also contributes an equal spillover to the neighboring areas.
+
+2)Price.range.L:  The direct or internal impact of this variable is ~ 41% and the rest is indirect impact. This implies that the price range of this bucket, has a higher spillover than the direct impact.
+
+3)Price.Range.Q: The direct or internal impact of this variable is ~ 32% and the rest is indirect impact. This implies that the price range of this bucket, has a higher spillover than the direct impact by a ratio of 68:32%
+
+4)Price.range.C: This variable is insignificant in all the models so , impact of this variable is not much, as again its not a significant variable.
+
+5)dist: Again, for this variable the ratio of direct to indirect impact (or spillover) is 1:2, indicating that there is double the amount of spillover than there is a direct impact.
+
+6)Cafe1: For the variable Cafe, we have 60% direct impact than the indirect impact, indicating a minimal spillover.
+
+7)Desserts1: For Desserts variable, again we have almost 70% of the impact to be direct, indicating minimal spillover.
+
+8)Fast_Food1: For Fast Foods variable, we have around 41% of the impact to be direct and the rest 59% is indirect indicating a huge spillover.
+
+9)Has.Table.bookingYes: This variable has an even lower ratio of direct impact, that is 37% of direct or internal impact and the rest of the impact is a spillover.
+
+10)Has.Online.deliveryYes: This vale has almost no direct impact all the impact is getting spilled-over.
+
+
+# Conclusion
+
+In conclusion with a continuous spatial matrix, and the available variables the best model based on AIC value and the highest number of significant variables is the Manski Model or GNS model. But this model has the significant variables which have a very high spillover and very little direct impact. Some ways to better is to change the weight matrix or the variables, but for our paper we have chosen these parameters.
+
+
+
+
+
+
+
